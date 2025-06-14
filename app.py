@@ -58,7 +58,7 @@ for _, row in batch.iterrows():
     for col_name in row.index:
         if col_name.startswith("Image_URL_") and pd.notna(row[col_name]):
             with image_cols[img_index % 3]:
-                st.image(row[col_name], caption=col_name, use_column_width=True)
+                st.image(row[col_name], caption=col_name, use_container_width=True)
                 img_index += 1
 
     st.markdown("#### Select a Decision:")
