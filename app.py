@@ -75,7 +75,8 @@ for _, row in batch.iterrows():
                 "Decision": decision_text
             })
             st.session_state.processed_ids.add(row["ID"])
-            st.experimental_rerun()
+            streamlit.rerun()
+
 
     with row1[0]:
         if st.button("✅ Okay", key=f"{row['ID']}_okay"):
