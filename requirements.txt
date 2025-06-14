@@ -2,3 +2,5 @@ streamlit
 pandas
 requests
 gdown
+gspread
+oauth2client
