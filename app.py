@@ -1,92 +1,116 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
+import gdown
 
-# -------------- Google Sheets Setup --------------
-@st.cache_resource
-def init_gsheets():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
-    client = gspread.authorize(creds)
-    sheet = client.open("Image Review Results").sheet1
-    return sheet
-
-sheet = init_gsheets()
-
-# -------------- Load Data --------------
+# ---------- Load Data from Google Drive ----------
 @st.cache_data
 def load_data():
-    return pd.read_csv("data.csv")
+    file_id = "1ZbYSbmPOBGoCBFOh1rEIbNdzmKzqp9qX"  # Replace this with your actual file ID
+    url = f"https://drive.google.com/uc?id={file_id}"
+    output = "data.csv"
+    gdown.download(url, output, quiet=False)
+    return pd.read_csv(output)
 
 df = load_data()
 
-# -------------- Session State Setup --------------
+# ---------- Session State ----------
 if "index" not in st.session_state:
     st.session_state.index = 0
+if "results" not in st.session_state:
+    st.session_state.results = []
 if "processed_ids" not in st.session_state:
     st.session_state.processed_ids = set()
 
-# -------------- UI Setup --------------
+# ---------- App Layout ----------
 st.title("📦 Image Review Tool")
 
 # Filter by Location
-location = st.selectbox("📍 Choose Location:", df["Location"].unique())
+location = st.selectbox("📍 Choose a Location:", sorted(df["Location"].dropna().unique()))
 filtered_df = df[df["Location"] == location].reset_index(drop=True)
 
+# Pagination
 start = st.session_state.index
 end = min(start + 10, len(filtered_df))
 batch = filtered_df.iloc[start:end]
 
-# -------------- Helper: Send to Sheet --------------
-def send_to_sheet(row_id, location, decision):
-    sheet.append_row([row_id, location, decision, datetime.now().isoformat()])
+# ---------- CSS Styling ----------
+st.markdown("""
+    <style>
+    .stButton>button {
+        width: 100%;
+        height: 40px;
+        font-weight: 600;
+        border-radius: 8px;
+        margin-top: 5px;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# -------------- Helper: Record --------------
-def record(row, decision_text):
-    if row["ID"] not in st.session_state.processed_ids:
-        send_to_sheet(row["ID"], row["Location"], decision_text)
-        st.session_state.processed_ids.add(row["ID"])
-        st.experimental_rerun()
-
-# -------------- Display Rows --------------
+# ---------- Display Each Row ----------
 for _, row in batch.iterrows():
+    if row["ID"] in st.session_state.processed_ids:
+        continue
+
     st.subheader(f"🆔 ID: {row['ID']}")
+    image_cols = st.columns(3)
+    img_index = 0
 
-    # Show images if available
-    cols = st.columns(3)
-    for i in range(1, 10):
-        col = cols[(i - 1) % 3]
-        url = row.get(f"Image_URL_{i}")
-        if isinstance(url, str) and url.startswith("http"):
-            with col:
-                st.image(url, caption=f"Image_URL_{i}", use_container_width=True)
+    for col_name in row.index:
+        if col_name.startswith("Image_URL_") and pd.notna(row[col_name]):
+            with image_cols[img_index % 3]:
+                st.image(row[col_name], caption=col_name, use_container_width=True)
+                img_index += 1
 
-    # 7 Decision Buttons
-    buttons = [
-        "Okay",
-        "Secondary packaging not opened",
-        "Dark/Blurry/Random Image",
-        "Brand box with Brand Seal not captured",
-        "Box Description/MRP tag not captured",
-        "Brand Box/Product wrapping not opened",
-        "Main product and accessories image not captured or partially captured"
-    ]
+    st.markdown("#### Select a Decision:")
 
-    st.markdown("### Your Decision:")
-    btn_cols = st.columns(3)
-    for i, label in enumerate(buttons):
-        with btn_cols[i % 3]:
-            if st.button(label, key=f"{row['ID']}_{label}"):
-                record(row, label)
+    # Button Rows
+    row1 = st.columns(4)
+    row2 = st.columns(3)
 
-    st.markdown("---")
+    def record(decision_text):
+        if row["ID"] not in st.session_state.processed_ids:
+            st.session_state.results.append({
+                "ID": row["ID"],
+                "Location": row["Location"],
+                "Decision": decision_text
+            })
+            st.session_state.processed_ids.add(row["ID"])
+            st.experimental_rerun()
 
-# -------------- Pagination --------------
+    with row1[0]:
+        if st.button("✅ Okay", key=f"{row['ID']}_okay"):
+            record("Okay")
+    with row1[1]:
+        if st.button("📦 Secondary packaging not opened", key=f"{row['ID']}_pack"):
+            record("Secondary packaging not opened")
+    with row1[2]:
+        if st.button("🌑 Dark/Blurry/Random Image", key=f"{row['ID']}_blurry"):
+            record("Dark/Blurry/Random Image")
+    with row1[3]:
+        if st.button("🔒 Brand Seal not captured", key=f"{row['ID']}_seal"):
+            record("Brand box with Brand Seal not captured")
+    with row2[0]:
+        if st.button("🏷️ MRP tag not captured", key=f"{row['ID']}_mrp"):
+            record("Box Description/MRP tag not captured")
+    with row2[1]:
+        if st.button("📦❌ Wrapping not opened", key=f"{row['ID']}_wrap"):
+            record("Brand Box/Product wrapping not opened")
+    with row2[2]:
+        if st.button("🎁📷 Main image not captured", key=f"{row['ID']}_main"):
+            record("Main product and accessories image not captured or partially captured")
+
+# ---------- Navigation ----------
 if end < len(filtered_df):
     if st.button("➡️ Next 10"):
         st.session_state.index += 10
         st.rerun()
 else:
-    st.success("✅ You've reviewed all items in this location.")
+    st.info("✅ You've reached the end of the list.")
+
+# ---------- Save & Download ----------
+if st.button("💾 Download CSV"):
+    result_df = pd.DataFrame(st.session_state.results)
+    result_df.to_csv("results.csv", index=False)
+    st.success("✅ Results saved!")
+    with open("results.csv", "rb") as f:
+        st.download_button("⬇️ Download Results", f, file_name="review_results.csv")
