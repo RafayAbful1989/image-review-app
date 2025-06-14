@@ -75,7 +75,7 @@ for _, row in batch.iterrows():
                 "Decision": decision_text
             })
             st.session_state.processed_ids.add(row["ID"])
-            streamlit.rerun()
+            st.rerun()
 
 
     with row1[0]:
